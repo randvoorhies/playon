@@ -1,5 +1,11 @@
 window.onload = function() {
 
+  if (!Array.prototype.last){
+    Array.prototype.last = function(){
+      return this[this.length - 1];
+    };
+  };
+
   var video = document.getElementById("video");
 
   var canvas = document.getElementById("scrubber");
@@ -11,6 +17,11 @@ window.onload = function() {
     0, 0,
     stage.canvas.width / video.duration,
     1);
+
+  var ticks = {
+    minutes : null,
+    seconds : null
+  }
 
   var colors = [
     "#114b5f",
@@ -25,6 +36,26 @@ window.onload = function() {
     { audio: document.getElementById("talking"), video_time: 20.0, audio_in_time: 10.0, audio_out_time: 50.0, visual: null },
   ];
 
+
+  // Create the minute ticks
+  ticks.minutes = new createjs.Container();
+  for(var t=0; t<video.duration; t+=60) {
+    var tick = new createjs.Container();
+
+    var tickline = new createjs.Shape();
+    tickline.graphics.
+      setStrokeStyle(0.25).
+      beginStroke('#bbb').
+      moveTo(t, 0).
+      lineTo(t, stage.canvas.height);
+    tick.addChild(tickline);
+
+    ticks.minutes.addChild(tick);
+  }
+  stage.addChild(ticks.minutes);
+  stage.update();
+
+
   // Add all of the audio tracks
   var track_height = Math.min(100, stage.canvas.height / audio_tracks.length);
   for(var i=0; i<audio_tracks.length; ++i) {
@@ -32,7 +63,7 @@ window.onload = function() {
     track.visual = new createjs.Container();
     var color = colors[i % colors.length];
 
-    var whole_track= new createjs.Shape();
+    var whole_track = new createjs.Shape();
     whole_track.graphics.beginFill(color).drawRect(
       track.video_time,
       i * track_height,
@@ -41,26 +72,29 @@ window.onload = function() {
     whole_track.alpha = 0.6;
     track.visual.addChild(whole_track);
 
-    var track_middle = new createjs.Shape();
-    track_middle.graphics.beginFill(color).drawRect(
+    var track_playable = new createjs.Shape();
+    track_playable.graphics.beginFill(color).drawRect(
       track.video_time + track.audio_in_time,
       i * track_height,
       Math.min(track.audio.duration, track.audio_out_time - track.audio_in_time),
       track_height);
-    track.visual.addChild(track_middle);
+    track.visual.addChild(track_playable);
+
+    var track_text = new createjs.Text(track.audio.src.split('/').last(), "16px Arial", "#000");
+    track_text.x = track.video_time;
+    track_text.y = i * track_height + track_height;
+    track_text.textBaseline = "bottom";
+    track_text.maxWidth = track.audio.duration;
+    track.visual.addChild(track_text);
 
     stage.addChild(track.visual);
     console.log(track.visual);
   }
 
 
+
   // Add the scrubber line
   var scrubber = new createjs.Container();
-
-  //var scrubber_outside = new createjs.Shape();
-  //scrubber_outside.graphics.setStrokeStyle(20.00).beginStroke("#fcf").moveTo(0, 0).lineTo(0, stage.canvas.height);
-  //scrubber_outside.alpha = 0.25;
-  //scrubber.addChild(scrubber_outside);
 
   var scrubber_middle = new createjs.Shape();
   scrubber_middle.graphics.setStrokeStyle(1).beginStroke("#222").moveTo(0, 0).lineTo(0, stage.canvas.height);
@@ -154,21 +188,41 @@ window.onload = function() {
 
   canvas.addEventListener("mousewheel", on_mouse_wheel, false);
   canvas.addEventListener("DOMMouseScroll", on_mouse_wheel, false);
+
+  function get_mouse_timeline() {
+    var mat = stage.getMatrix();
+    var scale = 1.0 / mat.a;
+    var translation = mat.tx;
+    //console.log(stage.getMatrix());
+    return scale * (stage.mouseX - translation);
+  }
   
   function on_mouse_wheel(e) {
-  var zoom = 1.05;
+    var zoom = 1.02;
     if(Math.max(-1, Math.min(1, (e.wheelDelta || -e.detail))) < 0) {
       zoom = 1.0 / zoom;
     }
 
-    stage.regX = stage.mouseX;
-    stage.x = stage.mouseX;
+    var timeline_x = get_mouse_timeline();
+
     stage.scaleX *= zoom;
+    stage.regX = (timeline_x + stage.mouseX);
+    stage.x = stage.regX
+
+    // Find all of the text labels, and rescale them 1:1 aspect ratio
+    for(var i=0; i<audio_tracks.length; ++i) {
+      track = audio_tracks[i];
+      text_element = _.find(track.visual.children, function(c) { return _.has(c, 'font'); });
+      text_element.scaleY = stage.scaleX;
+      console.log(text_element);
+    }
+
     stage.update();
   }
 
   stage.addEventListener("stagemousedown", function(e) {
     var offset={x:stage.x-e.stageX,y:0};
+
     stage.addEventListener("stagemousemove",function(ev) {
       stage.x = ev.stageX+offset.x;
       stage.y = 0;
@@ -182,11 +236,7 @@ window.onload = function() {
   stage.on("stagemousedown", function(event) {
     console.log('click', event);
     if(event.nativeEvent.metaKey) {
-      var m = stage.getMatrix();
-      m.invert();
-      pt = m.transformPoint(stage.mouseX, stage.mouseY);
-      console.log(stage.mouseX, pt, stage.getMatrix(), m);
-      video.currentTime = pt.x
+      video.currentTime = get_mouse_timeline();
     }
   })
 
